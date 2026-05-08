@@ -105,7 +105,7 @@ function NotifBell({notifications,onClear,onDismiss}){
 
 /* AUTH */
 function AuthPage({onAuth,showToast,siteUrl}){
-  const[mode,setMode]=useState("login");const[email,setEmail]=useState("mst3k@virginia.edu");const[password,setPassword]=useState("");const[name,setName]=useState("");const[compId,setCompId]=useState("");const[loading,setLoading]=useState(false);const[confirmSent,setConfirmSent]=useState(false);
+  const[mode,setMode]=useState("login");const[email,setEmail]=useState("");const[password,setPassword]=useState("");const[name,setName]=useState("");const[compId,setCompId]=useState("");const[loading,setLoading]=useState(false);const[confirmSent,setConfirmSent]=useState(false);
   async function handleLogin(e){e.preventDefault();if(!email||!password){showToast("Enter email and password","error");return}setLoading(true);const{data,error}=await supabase.auth.signInWithPassword({email,password});setLoading(false);if(error){showToast(error.message.includes("Email not confirmed")?"Check your email to confirm first":error.message,"error");return}onAuth(data.session)}
   async function handleSignup(e){e.preventDefault();if(!name||!compId||!email||!password){showToast("Fill in all fields","error");return}if(!email.endsWith("@virginia.edu")){showToast("Must use @virginia.edu email","error");return}if(password.length<6){showToast("Password must be 6+ characters","error");return}setLoading(true);const{data,error}=await supabase.auth.signUp({email,password,options:{data:{name,comp_id:compId},emailRedirectTo:siteUrl}});if(error){setLoading(false);showToast(error.message,"error");return}await supabase.from("users").upsert({id:data.user.id,name,comp_id:compId,email,role:"user"},{onConflict:"email"});setLoading(false);setConfirmSent(true)}
   async function handleForgot(e){e.preventDefault();if(!email){showToast("Enter your email","error");return}setLoading(true);const{error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:siteUrl});setLoading(false);if(error){showToast(error.message,"error");return}showToast("Reset email sent!","success");setMode("login")}
@@ -160,16 +160,34 @@ function HomePage({printers,jobs,onNavigate}){
 
 /* JOIN QUEUE */
 function JoinQueuePage({printers,jobs,userProfile,isAdmin,onJoinQueue,showToast}){
-  const[duration,setDuration]=useState("");const[printName,setPrintName]=useState("");const[qWindow,setQWindow]=useState("asap");
+  const[duration,setDuration]=useState("");const[printName,setPrintName]=useState("");const[qWindow,setQWindow]=useState("now");
   const dur=parseFloat(duration)||0;const isOvernight=dur>8;
   const activeCount=jobs.filter(j=>(j.comp_id===userProfile.comp_id)&&(j.status==="reserved"||j.status==="checkedIn")).length;
   const atLimit=!isAdmin&&activeCount>=2;
   const slot=dur>0?findNextSlot(printers,jobs,dur,isOvernight):null;
+  // Check if "Now" is available (any printer free right now)
+  const nowAvailable=dur>0&&slot&&(new Date(slot.date+"T00:00:00").getTime()+slot.startHour*3600000-Date.now()<60000);
+  // Build time options: "Now" if available, then 15-min increments rounded to :00/:15/:30/:45, up to 2 hours
+  const timeOpts=(()=>{
+    const opts=[];
+    const now=new Date();const curMin=now.getMinutes();
+    // Round up to next :00/:15/:30/:45
+    const nextQ=Math.ceil(curMin/15)*15;
+    const baseDate=new Date(now);baseDate.setSeconds(0,0);
+    if(nextQ>=60){baseDate.setHours(baseDate.getHours()+1);baseDate.setMinutes(0)}else{baseDate.setMinutes(nextQ)}
+    for(let i=1;i<=8;i++){
+      const t=new Date(baseDate.getTime()+i*15*60000);
+      const h=t.getHours()+t.getMinutes()/60;
+      const label=fH(h);
+      opts.push({key:String(i*15),label,hours:h});
+    }
+    return opts;
+  })();
   function handleSubmit(){
     if(atLimit){showToast("You already have 2 active prints. Check out or cancel one first.","error");return}
     if(!duration){showToast("Enter duration","error");return}if(dur<0.25){showToast("Min 15 minutes","error");return}
     onJoinQueue({name:userProfile.name,compId:userProfile.comp_id,email:userProfile.email,duration:dur,isOvernight,printName:printName.trim()||null,qWindow});
-    setDuration("");setPrintName("");setQWindow("asap");
+    setDuration("");setPrintName("");setQWindow("now");
   }
   return(<div style={{maxWidth:600,margin:"0 auto"}}>
     <div style={{marginBottom:24}}><h1 style={{fontFamily:"'Playfair Display',serif",fontSize:30,color:"#1a1a2e",margin:"0 0 4px"}}>Join the Print Queue</h1></div>
@@ -181,7 +199,11 @@ function JoinQueuePage({printers,jobs,userProfile,isAdmin,onJoinQueue,showToast}
         <div><label style={lbl}>Print Name <span style={{fontWeight:400,color:"#aaa"}}>(optional)</span></label><input value={printName} onChange={e=>setPrintName(e.target.value)} placeholder="e.g. Phone stand v2" style={inp}/></div>
         <div><label style={lbl}>Print Duration (hours)</label><input value={duration} onChange={e=>setDuration(e.target.value)} placeholder="2.5" style={inp} type="number" min="0.25" step="0.25"/><div style={{fontSize:11,color:"#aaa",marginTop:4}}>Min 15 min. +15 min buffer each side automatically.</div></div>
         <div><label style={lbl}>When do you want to print?</label>
-          <div style={{display:"flex",gap:8}}>{[{k:"asap",l:"As soon as possible"},{k:"2h",l:"Within 2 hours"}].map(o=><button key={o.k} onClick={()=>setQWindow(o.k)} style={{flex:1,padding:"10px 12px",borderRadius:8,border:qWindow===o.k?"2px solid #d4740e":"1px solid #ddd",background:qWindow===o.k?"#fef7ed":"#fff",color:qWindow===o.k?"#d4740e":"#555",fontSize:13,fontWeight:qWindow===o.k?600:400,cursor:"pointer"}}>{o.l}</button>)}</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <button onClick={()=>setQWindow("now")} style={{padding:"9px 16px",borderRadius:8,border:qWindow==="now"?"2px solid #d4740e":"1px solid #ddd",background:qWindow==="now"?"#fef7ed":"#fff",color:qWindow==="now"?"#d4740e":nowAvailable?"#555":"#bbb",fontSize:13,fontWeight:qWindow==="now"?600:400,cursor:nowAvailable?"pointer":"not-allowed",opacity:nowAvailable?1:0.5}}>Now</button>
+            {timeOpts.map(o=><button key={o.key} onClick={()=>setQWindow(o.key)} style={{padding:"9px 12px",borderRadius:8,border:qWindow===o.key?"2px solid #d4740e":"1px solid #ddd",background:qWindow===o.key?"#fef7ed":"#fff",color:qWindow===o.key?"#d4740e":"#555",fontSize:13,fontWeight:qWindow===o.key?600:400,cursor:"pointer"}}>{o.label}</button>)}
+          </div>
+          {!nowAvailable&&qWindow==="now"&&dur>0&&<div style={{fontSize:11,color:"#d4740e",marginTop:6}}>No printer is available right now. Pick a later time or we'll assign the soonest slot.</div>}
         </div>
         {isOvernight&&<div style={iB("#f0f4ff","#3d7ec7")}><div style={{color:"#1e3a5f"}}>This print is over 8 hours and will be scheduled after 5 PM.</div></div>}
         {slot&&dur>0&&<div style={{padding:"14px 18px",background:"#f0f9f0",borderRadius:10,border:"1px solid #c6e6c6"}}><div style={{fontSize:12,color:"#2d4a27",fontWeight:600,marginBottom:4}}>Your estimated slot:</div><div style={{fontSize:15,color:"#1a1a2e",fontWeight:600}}>{slot.printerName} · {fH(slot.startHour)} on {slot.date===dk(new Date())?"Today":slot.date}</div><div style={{fontSize:11,color:"#888",marginTop:2}}>Buffer: {fH(slot.startHour-BUFFER)} (setup) → {fH(slot.startHour)} (print) → {fH(slot.startHour+dur)} (done) → {fH(slot.startHour+dur+BUFFER)} (removal)</div></div>}
@@ -193,18 +215,18 @@ function JoinQueuePage({printers,jobs,userProfile,isAdmin,onJoinQueue,showToast}
 
 /* RESERVE */
 function ReservePage({printers,jobs,userProfile,isAdmin,onReserve,showToast}){
-  const[duration,setDuration]=useState("");const[printerId,setPrinterId]=useState("");const[date,setDate]=useState(dk(aD(new Date(),1)));const[hour,setHour]=useState("");const[printName,setPrintName]=useState("");
+  const[duration,setDuration]=useState("");const[printerId,setPrinterId]=useState("");const[date,setDate]=useState(dk(new Date()));const[hour,setHour]=useState("");const[printName,setPrintName]=useState("");
   const dur=parseFloat(duration)||0;const isOvernight=dur>8;const online=printers.filter(p=>p.online);
   const activeCount=jobs.filter(j=>(j.comp_id===userProfile.comp_id)&&(j.status==="reserved"||j.status==="checkedIn")).length;
   const atLimit=!isAdmin&&activeCount>=2;
-  const dateOpts=Array.from({length:14},(_,i)=>{const d=aD(new Date(),i+1);return{key:dk(d),label:i===0?"Tomorrow":fDt(d)}});
+  const dateOpts=Array.from({length:14},(_,i)=>{const d=aD(new Date(),i);return{key:dk(d),label:i===0?"Today":i===1?"Tomorrow":fDt(d)}});
   function getSlots(){
     if(!printerId||dur<=0)return[];
     const pJ=jobs.filter(j=>j.printer_id===Number(printerId)&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
     const slots=[];const sR=isOvernight?17:0;const eR=24;
     for(let h=sR;h<eR;h+=0.5){
       const sD=new Date(date+"T00:00:00"),sS=sD.getTime()+h*3600000,sE=sS+dur*3600000;
-      if(sS-Date.now()<24*3600000)continue;
+      if(sS<Date.now())continue;
       if(sE>sD.getTime()+24*3600000)continue;
       const bS=sS-BUFFER*3600000,bE=sE+BUFFER*3600000;
       const conflict=pJ.some(j=>{const jb=jBS(j),je=jBE(j);return bS<je&&bE>jb});
@@ -216,14 +238,12 @@ function ReservePage({printers,jobs,userProfile,isAdmin,onReserve,showToast}){
   function handleSubmit(){
     if(atLimit){showToast("You have 2 active prints already.","error");return}
     if(!duration||!printerId||hour===""){showToast("Fill all fields","error");return}
-    const sS=new Date(date+"T00:00:00").getTime()+parseFloat(hour)*3600000;
-    if(sS-Date.now()<24*3600000){showToast("Reservations must be 24+ hours in advance. Use Join Queue for sooner prints.","error");return}
     onReserve({name:userProfile.name,compId:userProfile.comp_id,email:userProfile.email,duration:dur,printerId:Number(printerId),date,startHour:parseFloat(hour),isOvernight,printName:printName.trim()||null});
     setDuration("");setPrinterId("");setHour("");setPrintName("");
   }
   return(<div style={{maxWidth:600,margin:"0 auto"}}>
     <div style={{marginBottom:24}}><h1 style={{fontFamily:"'Playfair Display',serif",fontSize:30,color:"#1a1a2e",margin:"0 0 4px"}}>Reserve a Slot</h1></div>
-    <div style={iB("#f0f4ff","#3d7ec7")}><div style={{color:"#1e3a5f"}}><strong>Note:</strong> Reservations must be at least 24 hours in advance. Use "Join Queue" for same-day prints. A 15-min buffer is added on each side for setup and removal.</div></div>
+    <div style={iB("#f0f4ff","#3d7ec7")}><div style={{color:"#1e3a5f"}}><strong>Note:</strong> Use "Join Queue" for the fastest available slot, or reserve here to pick a specific printer and time. A 15-min buffer is added on each side for setup and removal.</div></div>
     {atLimit&&<div style={iB("#fef2f2","#ef4444")}><div style={{color:"#842029"}}><strong>Limit reached:</strong> You have 2 active prints.</div></div>}
     <div style={{...C,padding:24}}>
       <div style={{padding:"12px 16px",background:"#f9f9f9",borderRadius:10,marginBottom:18,display:"flex",alignItems:"center",gap:12}}><div style={{width:36,height:36,borderRadius:"50%",background:"#1a1a2e",color:"#d4740e",display:"flex",alignItems:"center",justifyContent:"center"}}>{I.user}</div><div><div style={{fontSize:14,fontWeight:600,color:"#1a1a2e"}}>{userProfile.name}</div><div style={{fontSize:12,color:"#888"}}>{userProfile.comp_id}</div></div></div>
@@ -245,8 +265,18 @@ function ReservePage({printers,jobs,userProfile,isAdmin,onReserve,showToast}){
 function SchedulePage({printers,jobs,userProfile,isAdmin,onCheckIn,onCheckOut,onCancel,onReportFailure}){
   const[selDate,setSelDate]=useState(new Date());const[weekBase,setWeekBase]=useState(new Date());
   const week=gW(weekBase);const today=dk(new Date());const sd=dk(selDate);const ROW_H=48;const hours=Array.from({length:24},(_,i)=>i);
-  const dayJobs=jobs.filter(j=>{if(j.status==="cancelled")return false;const dS=new Date(sd+"T00:00:00").getTime(),dE=dS+86400000,js=jAS(j),je=jAE(j);return js<dE&&je>dS});
-  function gJD(job,pid){if(job.printer_id!==pid)return null;const dS=new Date(sd+"T00:00:00").getTime(),js=jAS(job),je=jAE(job),vS=Math.max(js,dS),vE=Math.min(je,dS+86400000),sH=(vS-dS)/3600000,dH=(vE-vS)/3600000;const top=sH*ROW_H,height=Math.max(dH*ROW_H-2,20);const c={reserved:{bg:"#1e3a5f",t:"#fff"},checkedIn:{bg:"#d4740e",t:"#fff"},completed:{bg:"#4a6741",t:"#fff"},failed:{bg:"#842029",t:"#fff"}}[job.status]||{bg:"#1e3a5f",t:"#fff"};return{top,height,bg:c.bg,text:c.t}}
+  const dayJobs=jobs.filter(j=>{if(j.status==="cancelled")return false;const dS=new Date(sd+"T00:00:00").getTime(),dE=dS+86400000,js=jAS(j)-BUFFER*3600000,je=jAE(j)+BUFFER*3600000;return js<dE&&je>dS});
+  function gJD(job,pid){if(job.printer_id!==pid)return null;const dS=new Date(sd+"T00:00:00").getTime();
+    const js=jAS(job),je=jAE(job),bs=js-BUFFER*3600000,be=je+BUFFER*3600000;
+    const vS=Math.max(bs,dS),vE=Math.min(be,dS+86400000);
+    if(vS>=vE)return null;
+    const totalTop=(vS-dS)/3600000*ROW_H, totalH=Math.max((vE-vS)/3600000*ROW_H-2,20);
+    const printVS=Math.max(js,dS),printVE=Math.min(je,dS+86400000);
+    const bufTopH=Math.max(0,(printVS-vS)/3600000*ROW_H);
+    const bufBotH=Math.max(0,(vE-printVE)/3600000*ROW_H);
+    const printH=Math.max(totalH-bufTopH-bufBotH,0);
+    const c={reserved:{bg:"#1e3a5f",t:"#fff"},checkedIn:{bg:"#d4740e",t:"#fff"},completed:{bg:"#4a6741",t:"#fff"},failed:{bg:"#842029",t:"#fff"}}[job.status]||{bg:"#1e3a5f",t:"#fff"};
+    return{top:totalTop,height:totalH,bg:c.bg,text:c.t,bufTopH,bufBotH,printH}}
   const isToday=sd===today,ch=nH();
   const isMine=j=>j.comp_id===userProfile?.comp_id||j.email===userProfile?.email;
   return(<div>
@@ -261,26 +291,32 @@ function SchedulePage({printers,jobs,userProfile,isAdmin,onCheckIn,onCheckOut,on
       <div style={{position:"relative"}}>{hours.map(h=><div key={h} style={{display:"grid",gridTemplateColumns:`60px repeat(${printers.length},1fr)`,borderBottom:"1px solid #f0f0f0",background:h>=20||h<8?"#fafaf8":"#fff"}}><div style={{padding:"6px 8px",height:ROW_H-1,fontSize:11,color:"#bbb",fontWeight:500}}>{fH(h)}</div>{printers.map(p=><div key={p.id} style={{borderLeft:"1px solid #f0f0f0",height:ROW_H}}/>)}</div>)}
         {printers.map((p,pi)=>{const pJ=dayJobs.filter(j=>j.printer_id===p.id);return pJ.map(job=>{const d=gJD(job,p.id);if(!d)return null;
           const mine=isMine(job);const canCI=job.status==="reserved"&&isToday&&mine;const canCO=job.status==="checkedIn"&&mine;const canDel=isAdmin||(mine&&(job.status==="reserved"||job.status==="checkedIn"));const canFail=job.status==="reserved"&&isToday&&mine;const canClear=isAdmin&&(job.status==="completed"||job.status==="failed");
-          return<div key={job.id} style={{position:"absolute",top:d.top+1,left:`calc(60px + ${pi}*((100% - 60px)/${printers.length}) + 2px)`,width:`calc((100% - 60px)/${printers.length} - 4px)`,height:d.height,background:d.bg,color:d.text,borderRadius:6,padding:"4px 6px",fontSize:10,fontFamily:"'DM Sans',sans-serif",overflow:"hidden",zIndex:2,cursor:"default"}}>
-            <div style={{fontWeight:600,lineHeight:1.2,fontSize:Math.min(11,Math.max(9,d.height/5))}}>{job.print_name||job.name}</div>
-            {d.height>28&&<div style={{opacity:0.75,fontSize:9}}>{job.comp_id} · {fD(job.duration)}</div>}
-            {d.height>36&&job.status==="checkedIn"&&<div style={{fontSize:8,opacity:0.7}}>Active</div>}
-            {d.height>36&&job.status==="completed"&&<div style={{fontSize:8,opacity:0.7}}>Done</div>}
-            {d.height>36&&job.status==="failed"&&<div style={{fontSize:8,opacity:0.7}}>Failed</div>}
-            {d.height>30&&(canCI||canCO||canDel||canFail||canClear)&&(
-              <div style={{display:"flex",gap:2,marginTop:2,flexWrap:"wrap"}}>
-                {canCI&&<button onClick={()=>onCheckIn(job.id)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Check In</button>}
-                {canCO&&<button onClick={()=>onCheckOut(job.id)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Check Out</button>}
-                {canFail&&<button onClick={()=>onReportFailure(job.id)} style={{background:"rgba(255,0,0,0.2)",border:"none",color:"#fff",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Failed</button>}
-                {canDel&&<button onClick={()=>onCancel(job.id)} style={{background:"rgba(255,255,255,0.1)",border:"none",color:"rgba(255,255,255,0.7)",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>{job.status==="reserved"||job.status==="checkedIn"?"Cancel":"Clear"}</button>}
-                {canClear&&!canDel&&<button onClick={()=>onCancel(job.id)} style={{background:"rgba(255,255,255,0.1)",border:"none",color:"rgba(255,255,255,0.7)",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Clear</button>}
-              </div>
-            )}
+          const colL=`calc(60px + ${pi}*((100% - 60px)/${printers.length}) + 2px)`,colW=`calc((100% - 60px)/${printers.length} - 4px)`;
+          return<div key={job.id} style={{position:"absolute",top:d.top+1,left:colL,width:colW,height:d.height,zIndex:2,display:"flex",flexDirection:"column",borderRadius:6,overflow:"hidden",cursor:"default"}}>
+            {d.bufTopH>0&&<div style={{height:d.bufTopH,background:"repeating-linear-gradient(135deg,rgba(255,190,60,0.35),rgba(255,190,60,0.35) 3px,rgba(255,190,60,0.15) 3px,rgba(255,190,60,0.15) 6px)",borderBottom:"1px dashed rgba(255,255,255,0.3)"}}/>}
+            <div style={{flex:1,minHeight:0,background:d.bg,color:d.text,padding:"4px 6px",fontSize:10,fontFamily:"'DM Sans',sans-serif",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+              <div style={{fontWeight:600,lineHeight:1.2,fontSize:Math.min(11,Math.max(9,d.printH/5))}}>{job.print_name||job.name}</div>
+              {d.printH>22&&<div style={{opacity:0.75,fontSize:9}}>{job.comp_id} · {fH(job.start_hour)}–{fH(job.start_hour+job.duration)}</div>}
+              {d.printH>34&&<div style={{opacity:0.6,fontSize:8}}>{fD(job.duration)}{job.status==="checkedIn"?" · Active":job.status==="completed"?" · Done":job.status==="failed"?" · Failed":""}</div>}
+              {d.printH>30&&(canCI||canCO||canDel||canFail||canClear)&&(
+                <div style={{display:"flex",gap:2,marginTop:2,flexWrap:"wrap"}}>
+                  {canCI&&<button onClick={()=>onCheckIn(job.id)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Check In</button>}
+                  {canCO&&<button onClick={()=>onCheckOut(job.id)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Check Out</button>}
+                  {canFail&&<button onClick={()=>onReportFailure(job.id)} style={{background:"rgba(255,0,0,0.2)",border:"none",color:"#fff",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Failed</button>}
+                  {canDel&&<button onClick={()=>onCancel(job.id)} style={{background:"rgba(255,255,255,0.1)",border:"none",color:"rgba(255,255,255,0.7)",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>{job.status==="reserved"||job.status==="checkedIn"?"Cancel":"Clear"}</button>}
+                  {canClear&&!canDel&&<button onClick={()=>onCancel(job.id)} style={{background:"rgba(255,255,255,0.1)",border:"none",color:"rgba(255,255,255,0.7)",fontSize:8,padding:"2px 4px",borderRadius:3,cursor:"pointer"}}>Clear</button>}
+                </div>
+              )}
+            </div>
+            {d.bufBotH>0&&<div style={{height:d.bufBotH,background:"repeating-linear-gradient(135deg,rgba(255,190,60,0.35),rgba(255,190,60,0.35) 3px,rgba(255,190,60,0.15) 3px,rgba(255,190,60,0.15) 6px)",borderTop:"1px dashed rgba(255,255,255,0.3)"}}/>}
           </div>})})}
         {isToday&&ch>=0&&ch<=24&&<div style={{position:"absolute",top:ch*ROW_H,left:0,right:0,height:2,background:"#ef4444",zIndex:3,boxShadow:"0 0 8px rgba(239,68,68,0.3)"}}><div style={{position:"absolute",left:2,top:-4,width:10,height:10,borderRadius:"50%",background:"#ef4444"}}/></div>}
       </div>
     </div></div>
-    <div style={{display:"flex",gap:16,marginTop:14,padding:"10px 16px",background:"#f9f9f9",borderRadius:10,fontSize:12,flexWrap:"wrap"}}>{[{l:"Reserved",c:"#1e3a5f"},{l:"Active",c:"#d4740e"},{l:"Completed",c:"#4a6741"},{l:"Failed",c:"#842029"}].map(x=><div key={x.l} style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:12,height:12,borderRadius:3,background:x.c}}/><span style={{color:"#888"}}>{x.l}</span></div>)}</div>
+    <div style={{display:"flex",gap:16,marginTop:14,padding:"10px 16px",background:"#f9f9f9",borderRadius:10,fontSize:12,flexWrap:"wrap",alignItems:"center"}}>
+      {[{l:"Reserved",c:"#1e3a5f"},{l:"Active",c:"#d4740e"},{l:"Completed",c:"#4a6741"},{l:"Failed",c:"#842029"}].map(x=><div key={x.l} style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:12,height:12,borderRadius:3,background:x.c}}/><span style={{color:"#888"}}>{x.l}</span></div>)}
+      <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:12,height:12,borderRadius:3,background:"repeating-linear-gradient(135deg,rgba(255,190,60,0.5),rgba(255,190,60,0.5) 2px,rgba(255,190,60,0.2) 2px,rgba(255,190,60,0.2) 4px)"}}/><span style={{color:"#888"}}>Buffer (15 min setup/removal)</span></div>
+    </div>
   </div>);
 }
 
