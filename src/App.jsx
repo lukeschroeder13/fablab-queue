@@ -224,14 +224,22 @@ function ReservePage({printers,jobs,userProfile,isAdmin,onReserve,showToast}){
   const dateOpts=Array.from({length:14},(_,i)=>{const d=aD(new Date(),i);return{key:dk(d),label:i===0?"Today":i===1?"Tomorrow":fDt(d)}});
   function getSlots(){
     if(!printerId||dur<=0)return[];
-    const pJ=jobs.filter(j=>j.printer_id===Number(printerId)&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
-    const slots=[];const sR=isOvernight?17:8;const eR=isOvernight?24:20;
-    for(let h=sR;h<eR;h+=0.5){
-      const sD=new Date(date+"T00:00:00"),sS=sD.getTime()+h*3600000,sE=sS+dur*3600000;
-      if(sS<Date.now())continue;
-      // For non-overnight prints, don't allow ending past 8 PM
-      if(!isOvernight&&sE>sD.getTime()+20*3600000)continue;
-      const bS=sS-BUFFER*3600000,bE=sE+BUFFER*3600000;
+    const pid=printerId;
+    // Get all active jobs for this printer (across all dates) - compare loosely for number/string
+    const pJ=jobs.filter(j=>String(j.printer_id)===String(pid)&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
+    const slots=[];
+    const sR=isOvernight?17:8;
+    const eR=isOvernight?23.5:20;
+    const selDay=new Date(date+"T00:00:00");
+    for(let h=sR;h<=eR;h+=0.25){
+      const slotStart=selDay.getTime()+h*3600000;
+      const slotEnd=slotStart+dur*3600000;
+      // Skip past times
+      if(slotStart<Date.now())continue;
+      // Non-overnight: print must end by 8 PM same day
+      if(!isOvernight&&slotEnd>selDay.getTime()+20*3600000)continue;
+      // Check conflict with buffer
+      const bS=slotStart-BUFFER*3600000,bE=slotEnd+BUFFER*3600000;
       const conflict=pJ.some(j=>{const jb=jBS(j),je=jBE(j);return bS<je&&bE>jb});
       if(!conflict)slots.push(h);
     }
@@ -398,10 +406,12 @@ export default function App(){
       const t5=new Date(d+"T17:00:00");
       sH=17; d=dk(t5);
     }
-    // Double-check for conflicts before inserting
-    const existing=jobs.filter(j=>j.printer_id===slot.printerId&&j.date===d&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
-    const newStart=sH,newEnd=sH+duration;
-    const hasConflict=existing.some(j=>{const jS=j.start_hour-BUFFER,jE=j.start_hour+j.duration+BUFFER;return(newStart-BUFFER)<jE&&(newEnd+BUFFER)>jS});
+    // Double-check for conflicts using absolute timestamps
+    const newAbsStart=new Date(d+"T00:00:00").getTime()+sH*3600000;
+    const newAbsEnd=newAbsStart+duration*3600000;
+    const bS=newAbsStart-BUFFER*3600000,bE=newAbsEnd+BUFFER*3600000;
+    const existing=jobs.filter(j=>String(j.printer_id)===String(slot.printerId)&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
+    const hasConflict=existing.some(j=>{const jb=jBS(j),je=jBE(j);return bS<je&&bE>jb});
     if(hasConflict){showToast("Slot conflict detected. Please try again.","error");await loadJobs();return}
     const{error}=await supabase.from("jobs").insert({name,comp_id:compId,email,printer_id:slot.printerId,date:d,start_hour:sH,duration,status:"reserved",is_overnight:isOvernight,from_queue:true,print_name:printName});
     if(error){showToast("Error: "+error.message,"error");return}
@@ -412,9 +422,12 @@ export default function App(){
   async function handleReserve({name,compId,email,duration,printerId,date,startHour,isOvernight,printName}){
     const activeCount=jobs.filter(j=>(j.comp_id===compId)&&(j.status==="reserved"||j.status==="checkedIn")).length;
     if(!isAdmin&&activeCount>=2){showToast("You have 2 active prints already.","error");return}
-    // Conflict check with buffer
-    const existing=jobs.filter(j=>j.printer_id===printerId&&j.date===date&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
-    const hasConflict=existing.some(j=>{const jS=j.start_hour-BUFFER,jE=j.start_hour+j.duration+BUFFER;return(startHour-BUFFER)<jE&&(startHour+duration+BUFFER)>jS});
+    // Conflict check with buffer using absolute timestamps (handles overnight cross-day)
+    const newStart=new Date(date+"T00:00:00").getTime()+startHour*3600000;
+    const newEnd=newStart+duration*3600000;
+    const bS=newStart-BUFFER*3600000,bE=newEnd+BUFFER*3600000;
+    const existing=jobs.filter(j=>String(j.printer_id)===String(printerId)&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
+    const hasConflict=existing.some(j=>{const jb=jBS(j),je=jBE(j);return bS<je&&bE>jb});
     if(hasConflict){showToast("This slot conflicts with an existing reservation.","error");await loadJobs();return}
     const{error}=await supabase.from("jobs").insert({name,comp_id:compId,email,printer_id:printerId,date,start_hour:startHour,duration,status:"reserved",is_overnight:isOvernight,from_queue:false,print_name:printName});
     if(error){showToast("Error: "+error.message,"error");return}
