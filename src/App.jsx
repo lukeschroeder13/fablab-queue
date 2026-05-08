@@ -229,7 +229,8 @@ function ReservePage({printers,jobs,userProfile,isAdmin,onReserve,showToast}){
     for(let h=sR;h<eR;h+=0.5){
       const sD=new Date(date+"T00:00:00"),sS=sD.getTime()+h*3600000,sE=sS+dur*3600000;
       if(sS<Date.now())continue;
-      if(sE>sD.getTime()+24*3600000)continue;
+      // For non-overnight prints, don't allow ending past 8 PM
+      if(!isOvernight&&sE>sD.getTime()+20*3600000)continue;
       const bS=sS-BUFFER*3600000,bE=sE+BUFFER*3600000;
       const conflict=pJ.some(j=>{const jb=jBS(j),je=jBE(j);return bS<je&&bE>jb});
       if(!conflict)slots.push(h);
