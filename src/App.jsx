@@ -20,7 +20,11 @@ function findNextSlot(printers,jobs,duration,isOvernight){
   for(const pr of online){
     const pJ=jobs.filter(j=>j.printer_id===pr.id&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed").sort((a,b)=>jAS(a)-jAS(b));
     const now=new Date();let cs=now.getTime();
-    if(isOvernight){const t5=new Date(now);t5.setHours(17,0,0,0);if(cs<t5.getTime())cs=t5.getTime()}
+    if(isOvernight){
+      const t5=new Date(now);t5.setHours(17,0,0,0);
+      if(now.getTime()>=t5.getTime()){t5.setDate(t5.getDate()+1)}
+      cs=Math.max(cs,t5.getTime());
+    }
     cs+=BUFFER*3600000;
     for(const job of pJ){const bs=jBS(job),be=jBE(job);if(cs+duration*3600000<=bs)break;if(be>cs)cs=be}
     if(!best||cs<best.st)best={pid:pr.id,st:cs,pn:pr.name}
@@ -108,7 +112,6 @@ function AuthPage({onAuth,showToast,siteUrl}){
   const[mode,setMode]=useState("login");const[email,setEmail]=useState("");const[password,setPassword]=useState("");const[name,setName]=useState("");const[compId,setCompId]=useState("");const[loading,setLoading]=useState(false);const[confirmSent,setConfirmSent]=useState(false);
   async function handleLogin(e){e.preventDefault();if(!email||!password){showToast("Enter email and password","error");return}setLoading(true);const{data,error}=await supabase.auth.signInWithPassword({email,password});setLoading(false);if(error){showToast(error.message.includes("Email not confirmed")?"Check your email to confirm first":error.message,"error");return}onAuth(data.session)}
   async function handleSignup(e){e.preventDefault();if(!name||!compId||!email||!password){showToast("Fill in all fields","error");return}if(!email.endsWith("@virginia.edu")){showToast("Must use @virginia.edu email","error");return}if(password.length<6){showToast("Password must be 6+ characters","error");return}setLoading(true);const{data,error}=await supabase.auth.signUp({email,password,options:{data:{name,comp_id:compId},emailRedirectTo:siteUrl}});if(error){setLoading(false);showToast(error.message,"error");return}await supabase.from("users").upsert({id:data.user.id,name,comp_id:compId,email,role:"user"},{onConflict:"email"});setLoading(false);setConfirmSent(true)}
-  async function handleForgot(e){e.preventDefault();if(!email){showToast("Enter your email","error");return}setLoading(true);const{error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:siteUrl});setLoading(false);if(error){showToast(error.message,"error");return}showToast("Reset email sent!","success");setMode("login")}
   if(confirmSent)return(<div style={{minHeight:"100vh",background:"#f5f4f0",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:20}}><div style={{...C,padding:40,maxWidth:440,width:"100%",textAlign:"center"}}><div style={{width:64,height:64,borderRadius:"50%",background:"#f0f9f0",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",color:"#22c55e"}}>{I.check}</div><h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1a1a2e",marginBottom:8}}>Check Your Email</h2><p style={{color:"#888",fontSize:14,marginBottom:24,lineHeight:1.6}}>Confirmation link sent to <strong>{email}</strong>.</p><button onClick={()=>{setConfirmSent(false);setMode("login")}} style={{...B("#1a1a2e","#fff"),padding:"12px 28px",fontSize:14}}>Back to Login</button></div></div>);
   return(
     <div style={{minHeight:"100vh",background:"#f5f4f0",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:20}}>
@@ -116,14 +119,12 @@ function AuthPage({onAuth,showToast,siteUrl}){
       <div style={{maxWidth:440,width:"100%"}}>
         <div style={{textAlign:"center",marginBottom:32}}><div style={{width:56,height:56,borderRadius:14,background:"linear-gradient(135deg,#1a1a2e,#0f3460)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#d4740e",marginBottom:16}}>{I.printer}</div><h1 style={{fontFamily:"'Playfair Display',serif",fontSize:28,color:"#1a1a2e",marginBottom:4}}>Fablab Printer Queue</h1><p style={{color:"#999",fontSize:13}}>University of Virginia</p></div>
         <div style={{...C,padding:28}}>
-          {mode!=="forgot"&&<div style={{display:"flex",marginBottom:24,background:"#f3f3f3",borderRadius:8,padding:3}}><button onClick={()=>setMode("login")} style={{flex:1,padding:"9px 0",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:mode==="login"?"#1a1a2e":"transparent",color:mode==="login"?"#fff":"#888"}}>Log In</button><button onClick={()=>setMode("signup")} style={{flex:1,padding:"9px 0",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:mode==="signup"?"#1a1a2e":"transparent",color:mode==="signup"?"#fff":"#888"}}>Sign Up</button></div>}
-          {mode==="forgot"&&<div style={{marginBottom:20}}><button onClick={()=>setMode("login")} style={{background:"none",border:"none",cursor:"pointer",color:"#d4740e",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>{I.left} Back</button><h3 style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#1a1a2e",marginTop:12}}>Reset Password</h3></div>}
+          <div style={{display:"flex",marginBottom:24,background:"#f3f3f3",borderRadius:8,padding:3}}><button onClick={()=>setMode("login")} style={{flex:1,padding:"9px 0",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:mode==="login"?"#1a1a2e":"transparent",color:mode==="login"?"#fff":"#888"}}>Log In</button><button onClick={()=>setMode("signup")} style={{flex:1,padding:"9px 0",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:mode==="signup"?"#1a1a2e":"transparent",color:mode==="signup"?"#fff":"#888"}}>Sign Up</button></div>
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             {mode==="signup"&&<><div><label style={lbl}>Full Name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="John Doe" style={inp}/></div><div><label style={lbl}>Computing ID</label><input value={compId} onChange={e=>setCompId(e.target.value)} placeholder="abc3de" style={inp}/></div></>}
             <div><label style={lbl}>UVA Email</label><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="mst3k@virginia.edu" style={inp} type="email"/></div>
-            {mode!=="forgot"&&<div><label style={lbl}>Password</label><input value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode==="signup"?"At least 6 characters":"Enter password"} style={inp} type="password"/></div>}
-            <button onClick={mode==="login"?handleLogin:mode==="signup"?handleSignup:handleForgot} disabled={loading} style={{...B("linear-gradient(135deg,#d4740e,#e8922e)","#fff"),width:"100%",justifyContent:"center",padding:"13px",fontSize:15,borderRadius:10,opacity:loading?0.7:1}}>{loading?"Please wait...":mode==="login"?"Log In":mode==="signup"?"Create Account":"Send Reset Link"}</button>
-            {mode==="login"&&<button onClick={()=>setMode("forgot")} style={{background:"none",border:"none",cursor:"pointer",color:"#d4740e",fontSize:12,textAlign:"center"}}>Forgot password?</button>}
+            <div><label style={lbl}>Password</label><input value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode==="signup"?"At least 6 characters":"Enter password"} style={inp} type="password"/></div>
+            <button onClick={mode==="login"?handleLogin:handleSignup} disabled={loading} style={{...B("linear-gradient(135deg,#d4740e,#e8922e)","#fff"),width:"100%",justifyContent:"center",padding:"13px",fontSize:15,borderRadius:10,opacity:loading?0.7:1}}>{loading?"Please wait...":mode==="login"?"Log In":"Create Account"}</button>
             {mode==="signup"&&<div style={{fontSize:11,color:"#aaa",textAlign:"center"}}>Only @virginia.edu emails accepted.</div>}
           </div>
         </div>
@@ -186,7 +187,8 @@ function JoinQueuePage({printers,jobs,userProfile,isAdmin,onJoinQueue,showToast}
   function handleSubmit(){
     if(atLimit){showToast("You already have 2 active prints. Check out or cancel one first.","error");return}
     if(!duration){showToast("Enter duration","error");return}if(dur<0.25){showToast("Min 15 minutes","error");return}
-    onJoinQueue({name:userProfile.name,compId:userProfile.comp_id,email:userProfile.email,duration:dur,isOvernight,printName:printName.trim()||null,qWindow});
+    if(isOvernight&&qWindow!=="now"){showToast("Overnight prints are auto-scheduled after 5 PM. Select 'Now' or leave as is.","warning");return}
+    onJoinQueue({name:userProfile.name,compId:userProfile.comp_id,email:userProfile.email,duration:dur,isOvernight,printName:printName.trim()||null});
     setDuration("");setPrintName("");setQWindow("now");
   }
   return(<div style={{maxWidth:600,margin:"0 auto"}}>
@@ -198,14 +200,14 @@ function JoinQueuePage({printers,jobs,userProfile,isAdmin,onJoinQueue,showToast}
       <div style={{display:"flex",flexDirection:"column",gap:16}}>
         <div><label style={lbl}>Print Name <span style={{fontWeight:400,color:"#aaa"}}>(optional)</span></label><input value={printName} onChange={e=>setPrintName(e.target.value)} placeholder="e.g. Phone stand v2" style={inp}/></div>
         <div><label style={lbl}>Print Duration (hours)</label><input value={duration} onChange={e=>setDuration(e.target.value)} placeholder="2.5" style={inp} type="number" min="0.25" step="0.25"/><div style={{fontSize:11,color:"#aaa",marginTop:4}}>Min 15 min. +15 min buffer each side automatically.</div></div>
-        <div><label style={lbl}>When do you want to print?</label>
+        {!isOvernight&&<div><label style={lbl}>When do you want to print?</label>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             <button onClick={()=>setQWindow("now")} style={{padding:"9px 16px",borderRadius:8,border:qWindow==="now"?"2px solid #d4740e":"1px solid #ddd",background:qWindow==="now"?"#fef7ed":"#fff",color:qWindow==="now"?"#d4740e":nowAvailable?"#555":"#bbb",fontSize:13,fontWeight:qWindow==="now"?600:400,cursor:nowAvailable?"pointer":"not-allowed",opacity:nowAvailable?1:0.5}}>Now</button>
             {timeOpts.map(o=><button key={o.key} onClick={()=>setQWindow(o.key)} style={{padding:"9px 12px",borderRadius:8,border:qWindow===o.key?"2px solid #d4740e":"1px solid #ddd",background:qWindow===o.key?"#fef7ed":"#fff",color:qWindow===o.key?"#d4740e":"#555",fontSize:13,fontWeight:qWindow===o.key?600:400,cursor:"pointer"}}>{o.label}</button>)}
           </div>
           {!nowAvailable&&qWindow==="now"&&dur>0&&<div style={{fontSize:11,color:"#d4740e",marginTop:6}}>No printer is available right now. Pick a later time or we'll assign the soonest slot.</div>}
-        </div>
-        {isOvernight&&<div style={iB("#f0f4ff","#3d7ec7")}><div style={{color:"#1e3a5f"}}>This print is over 8 hours and will be scheduled after 5 PM.</div></div>}
+        </div>}
+        {isOvernight&&<div style={iB("#f0f4ff","#3d7ec7")}><div style={{color:"#1e3a5f"}}>This print is over 8 hours and will be automatically scheduled after 5 PM (the earliest available overnight slot).</div></div>}
         {slot&&dur>0&&<div style={{padding:"14px 18px",background:"#f0f9f0",borderRadius:10,border:"1px solid #c6e6c6"}}><div style={{fontSize:12,color:"#2d4a27",fontWeight:600,marginBottom:4}}>Your estimated slot:</div><div style={{fontSize:15,color:"#1a1a2e",fontWeight:600}}>{slot.printerName} · {fH(slot.startHour)} on {slot.date===dk(new Date())?"Today":slot.date}</div><div style={{fontSize:11,color:"#888",marginTop:2}}>Buffer: {fH(slot.startHour-BUFFER)} (setup) → {fH(slot.startHour)} (print) → {fH(slot.startHour+dur)} (done) → {fH(slot.startHour+dur+BUFFER)} (removal)</div></div>}
         <button onClick={handleSubmit} disabled={atLimit} style={{...B("linear-gradient(135deg,#d4740e,#e8922e)","#fff"),width:"100%",justifyContent:"center",padding:"14px",fontSize:15,borderRadius:10,boxShadow:"0 4px 16px rgba(212,116,14,0.25)",opacity:atLimit?0.5:1}}>Join Queue</button>
       </div>
@@ -223,7 +225,7 @@ function ReservePage({printers,jobs,userProfile,isAdmin,onReserve,showToast}){
   function getSlots(){
     if(!printerId||dur<=0)return[];
     const pJ=jobs.filter(j=>j.printer_id===Number(printerId)&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
-    const slots=[];const sR=isOvernight?17:0;const eR=24;
+    const slots=[];const sR=isOvernight?17:8;const eR=isOvernight?24:20;
     for(let h=sR;h<eR;h+=0.5){
       const sD=new Date(date+"T00:00:00"),sS=sD.getTime()+h*3600000,sE=sS+dur*3600000;
       if(sS<Date.now())continue;
@@ -388,7 +390,13 @@ export default function App(){
     const activeCount=jobs.filter(j=>(j.comp_id===compId)&&(j.status==="reserved"||j.status==="checkedIn")).length;
     if(!isAdmin&&activeCount>=2){showToast("You already have 2 active prints.","error");return}
     const slot=findNextSlot(printers,jobs,duration,isOvernight);if(!slot){showToast("No printers available","error");return}
-    let sH=slot.startHour,d=slot.date;if(isOvernight&&sH<17)sH=17;
+    let sH=slot.startHour,d=slot.date;
+    // For overnight: ensure slot is at or after 5 PM
+    if(isOvernight&&sH<17){
+      // findNextSlot should already handle this, but double-check
+      const t5=new Date(d+"T17:00:00");
+      sH=17; d=dk(t5);
+    }
     // Double-check for conflicts before inserting
     const existing=jobs.filter(j=>j.printer_id===slot.printerId&&j.date===d&&j.status!=="cancelled"&&j.status!=="completed"&&j.status!=="failed");
     const newStart=sH,newEnd=sH+duration;
